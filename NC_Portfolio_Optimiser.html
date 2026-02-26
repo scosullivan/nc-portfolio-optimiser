@@ -1,0 +1,653 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Natural Capital Portfolio Optimiser — Gresham House</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --navy: #1B2A4A; --teal: #00A5A8; --bg: #F5F7FA; --w: #FFFFFF;
+    --mid: #64748B; --lt: #E6F7F7; --grn: #059669; --red: #DC2626;
+    --amb: #E67E22; --bdr: #E2E8F0; --fb: #F1F5F9;
+  }
+  body { font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif; background: var(--bg); color: var(--navy); -webkit-font-smoothing: antialiased; }
+  input[type="range"] { -webkit-appearance: none; appearance: none; width: 100%; height: 6px; border-radius: 3px; background: var(--bdr); outline: none; }
+  input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 18px; height: 18px; border-radius: 50%; cursor: pointer; border: 2px solid var(--w); box-shadow: 0 1px 3px rgba(0,0,0,.2); }
+  input[type="range"].navy::-webkit-slider-thumb { background: var(--navy); }
+  input[type="range"].teal::-webkit-slider-thumb { background: var(--teal); }
+  input[type="range"].purple::-webkit-slider-thumb { background: #7C3AED; }
+  input[type="range"].slate::-webkit-slider-thumb { background: #475569; }
+  input[type="range"].stone::-webkit-slider-thumb { background: #78716C; }
+  input[type="range"].green::-webkit-slider-thumb { background: var(--grn); }
+  input[type="range"].dgreen::-webkit-slider-thumb { background: #2D6A4F; }
+  input[type="range"].dteal::-webkit-slider-thumb { background: #0D9488; }
+  input[type="range"].lgray::-webkit-slider-thumb { background: #94A3B8; }
+  /* Firefox */
+  input[type="range"]::-moz-range-thumb { width: 18px; height: 18px; border-radius: 50%; cursor: pointer; border: 2px solid var(--w); box-shadow: 0 1px 3px rgba(0,0,0,.2); }
+  input[type="range"].navy::-moz-range-thumb { background: var(--navy); }
+  input[type="range"].teal::-moz-range-thumb { background: var(--teal); }
+  /* Scrollbar hide for tabs */
+  .tab-scroll::-webkit-scrollbar { display: none; }
+  .tab-scroll { -ms-overflow-style: none; scrollbar-width: none; }
+  #root { max-width: 640px; margin: 0 auto; min-height: 100vh; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script>
+const e = React.createElement;
+const { useState, useMemo, useCallback } = React;
+
+// ─── DATA FROM PAPER (GBP, 1995–2023) ───
+const NAVY="#1B2A4A",TEAL="#00A5A8",LBG="#F5F7FA",W="#FFFFFF",MID="#64748B",LT="#E6F7F7",GRN="#059669",RED="#DC2626";
+const AKEYS=["eq","bd","pe","inf","re","ac","pc","uf","usf"];
+const NC=["ac","pc","uf","usf"];
+const TR=["eq","bd","pe","inf","re"];
+
+const A={
+  eq:{n:"Equities",r:11.5,v:19.2,c:NAVY,cls:"navy"},
+  bd:{n:"Bonds",r:5.0,v:8.2,c:"#94A3B8",cls:"lgray"},
+  pe:{n:"Private Equity",r:16.4,v:15.1,c:"#7C3AED",cls:"purple"},
+  inf:{n:"Infrastructure",r:5.8,v:11.3,c:"#475569",cls:"slate"},
+  re:{n:"Real Estate",r:8.5,v:12.0,c:"#78716C",cls:"stone"},
+  ac:{n:"Annual Cropland",r:11.3,v:7.7,c:TEAL,cls:"teal"},
+  pc:{n:"Permanent Cropland",r:12.4,v:11.5,c:"#0D9488",cls:"dteal"},
+  uf:{n:"UK Forestry",r:12.1,v:12.4,c:GRN,cls:"green"},
+  usf:{n:"US Forestry",r:7.9,v:7.1,c:"#2D6A4F",cls:"dgreen"},
+};
+
+const CR={
+  eq:{eq:1,bd:.15,pe:.65,inf:.60,re:.55,ac:.10,pc:.12,uf:.08,usf:.06},
+  bd:{eq:.15,bd:1,pe:.10,inf:.25,re:.20,ac:.05,pc:.08,uf:.03,usf:.02},
+  pe:{eq:.65,bd:.10,pe:1,inf:.45,re:.40,ac:.08,pc:.10,uf:.06,usf:.05},
+  inf:{eq:.60,bd:.25,pe:.45,inf:1,re:.50,ac:.12,pc:.15,uf:.10,usf:.08},
+  re:{eq:.55,bd:.20,pe:.40,inf:.50,re:1,ac:.15,pc:.18,uf:.12,usf:.10},
+  ac:{eq:.10,bd:.05,pe:.08,inf:.12,re:.15,ac:1,pc:.45,uf:.20,usf:.15},
+  pc:{eq:.12,bd:.08,pe:.10,inf:.15,re:.18,ac:.45,pc:1,uf:.25,usf:.18},
+  uf:{eq:.08,bd:.03,pe:.06,inf:.10,re:.12,ac:.20,pc:.25,uf:1,usf:.35},
+  usf:{eq:.06,bd:.02,pe:.05,inf:.08,re:.10,ac:.15,pc:.18,uf:.35,usf:1},
+};
+
+const ST={
+  "2008 GFC":{eq:-38,bd:2,pe:-28,inf:-35,re:-30,ac:5,pc:-2,uf:3,usf:-4},
+  "2022 Rate Shock":{eq:-18,bd:-17,pe:-12,inf:-15,re:-14,ac:8,pc:4,uf:6,usf:3},
+  "Stagflation":{eq:-25,bd:-12,pe:-20,inf:-18,re:-15,ac:10,pc:6,uf:8,usf:5},
+};
+
+const RF=3.5;
+
+function corr(a,b){return CR[a]?.[b]??CR[b]?.[a]??0;}
+
+function calcStats(w){
+  let r=0,va=0;
+  AKEYS.forEach(k=>{r+=(w[k]||0)*A[k].r;});
+  AKEYS.forEach(a=>AKEYS.forEach(b=>{
+    va+=(w[a]||0)*(w[b]||0)*A[a].v*A[b].v*corr(a,b);
+  }));
+  const vol=Math.sqrt(Math.max(va,0));
+  return{r,vol,sh:vol>0?(r-RF)/vol:0};
+}
+
+function stressR(w,sc){let r=0;AKEYS.forEach(k=>{r+=(w[k]||0)*(ST[sc]?.[k]||0);});return r;}
+
+// ─── MVO SOLVER ───
+function projectOntoConstraints(weights,mins,maxs){
+  let w=weights.map((v,i)=>Math.max(mins[i],Math.min(maxs[i],v)));
+  for(let iter=0;iter<200;iter++){
+    const sum=w.reduce((a,b)=>a+b,0);
+    const diff=sum-1;
+    if(Math.abs(diff)<1e-8)break;
+    const adjustable=w.map((v,i)=>{
+      if(diff>0)return v>mins[i]+1e-9?i:-1;
+      return v<maxs[i]-1e-9?i:-1;
+    }).filter(i=>i>=0);
+    if(adjustable.length===0)break;
+    const adj=diff/adjustable.length;
+    adjustable.forEach(i=>{w[i]=Math.max(mins[i],Math.min(maxs[i],w[i]-adj));});
+  }
+  return w;
+}
+
+function solveMinVol(mins,maxs,targetReturn){
+  const n=AKEYS.length;
+  let w=AKEYS.map((k,i)=>(mins[i]+maxs[i])/2);
+  w=projectOntoConstraints(w,mins,maxs);
+  const lr0=0.0005;
+  for(let iter=0;iter<8000;iter++){
+    const lr=lr0*(1-iter/10000);
+    const grad=AKEYS.map((ki,i)=>{
+      let g=0;
+      AKEYS.forEach((kj,j)=>{g+=2*w[j]*A[ki].v*A[kj].v*corr(ki,kj);});
+      if(targetReturn!==null){
+        const curR=AKEYS.reduce((s,k,idx)=>s+w[idx]*A[k].r,0);
+        if(curR<targetReturn){g-=50*A[ki].r;}
+      }
+      return g;
+    });
+    w=w.map((wi,i)=>wi-lr*grad[i]);
+    w=projectOntoConstraints(w,mins,maxs);
+  }
+  const result={};AKEYS.forEach((k,i)=>{result[k]=Math.max(0,w[i]);});return result;
+}
+
+function solveMaxSharpe(mins,maxs){
+  const minR=AKEYS.reduce((s,k,i)=>s+mins[i]*A[k].r,0);
+  const maxR=AKEYS.reduce((s,k,i)=>s+maxs[i]*A[k].r,0);
+  let bestSharpe=-Infinity,bestW=null;
+  for(let s=0;s<=30;s++){
+    const tgt=minR+(maxR-minR)*s/30;
+    const w=solveMinVol(mins,maxs,tgt);
+    const stats=calcStats(w);
+    if(stats.sh>bestSharpe){bestSharpe=stats.sh;bestW=w;}
+  }
+  return bestW||{};
+}
+
+function solveMaxReturn(mins,maxs){
+  const sorted=AKEYS.map((k,i)=>({k,i,r:A[k].r})).sort((a,b)=>b.r-a.r);
+  const w=AKEYS.map((_,i)=>mins[i]);
+  let remaining=1-w.reduce((a,b)=>a+b,0);
+  for(const{i}of sorted){
+    const canAdd=Math.min(maxs[i]-w[i],remaining);
+    if(canAdd>0){w[i]+=canAdd;remaining-=canAdd;}
+    if(remaining<=1e-8)break;
+  }
+  const result={};AKEYS.forEach((k,i)=>{result[k]=Math.max(0,w[i]);});return result;
+}
+
+// ─── COMPONENTS ───
+function Pill({children,active,onClick}){
+  return e("button",{onClick,style:{
+    padding:"8px 14px",fontSize:13,fontWeight:600,border:"none",borderRadius:20,
+    backgroundColor:active?TEAL:"#E2E8F0",color:active?W:MID,
+    cursor:"pointer",whiteSpace:"nowrap",WebkitTapHighlightColor:"transparent",
+    transition:"all 0.2s",fontFamily:"inherit",
+  }},children);
+}
+
+function Card({children,accent,style}){
+  return e("div",{style:Object.assign({
+    background:W,borderRadius:12,padding:16,
+    border:accent?"2px solid "+TEAL:"1px solid #E2E8F0",
+    marginBottom:12,boxShadow:"0 1px 3px rgba(0,0,0,.04)",
+  },style||{})},children);
+}
+
+function Section({title,open,toggle,children,accent}){
+  return e("div",{style:{marginBottom:8}},
+    e("button",{onClick:toggle,style:{
+      width:"100%",display:"flex",justifyContent:"space-between",alignItems:"center",
+      padding:"12px 16px",background:accent?TEAL:NAVY,border:"none",
+      borderRadius:open?"12px 12px 0 0":"12px",cursor:"pointer",
+      WebkitTapHighlightColor:"transparent",fontFamily:"inherit",
+    }},
+      e("span",{style:{fontSize:14,fontWeight:700,color:W}},title),
+      e("span",{style:{fontSize:18,color:W,transform:open?"rotate(180deg)":"none",transition:"transform 0.2s"}},"▾")
+    ),
+    open && e("div",{style:{background:W,borderRadius:"0 0 12px 12px",border:accent?"2px solid "+TEAL:"1px solid #E2E8F0",borderTop:"none",padding:16}},children)
+  );
+}
+
+function RangeSlider({label,value,onChange,max,color,cls}){
+  return e("div",{style:{marginBottom:10}},
+    e("div",{style:{display:"flex",justifyContent:"space-between",marginBottom:2}},
+      e("span",{style:{fontSize:13,color:NAVY,fontWeight:500}},label),
+      e("span",{style:{fontSize:14,fontWeight:700,color:color||NAVY,fontVariantNumeric:"tabular-nums"}},value+"%")
+    ),
+    e("input",{type:"range",min:0,max:max||100,step:1,value:value,
+      onChange:function(ev){onChange(+ev.target.value);},
+      className:cls||"navy",
+      style:{width:"100%"}
+    })
+  );
+}
+
+function Stat({label,val,unit,delta}){
+  const pos=delta>0,neg=delta<0;
+  return e("div",{style:{flex:1,minWidth:0,textAlign:"center",padding:"10px 4px"}},
+    e("div",{style:{fontSize:10,color:MID,fontWeight:500,marginBottom:2,textTransform:"uppercase",letterSpacing:".5px"}},label),
+    e("div",{style:{fontSize:22,fontWeight:700,color:NAVY,fontVariantNumeric:"tabular-nums",fontFamily:"'DM Mono','DM Sans',monospace"}},val+(unit||"")),
+    delta!=null && e("div",{style:{fontSize:11,fontWeight:600,color:pos?GRN:neg?RED:MID,marginTop:1}},
+      (pos?"▲ +":neg?"▼ ":"– ")+Math.abs(delta).toFixed(2)+(unit||""))
+  );
+}
+
+function AllocBar({w}){
+  const items=AKEYS.map(function(k){return{n:A[k].n,v:Math.round((w[k]||0)*100),c:A[k].c};}).filter(function(i){return i.v>0;});
+  const t=items.reduce(function(s,i){return s+i.v;},0);
+  return e("div",{style:{display:"flex",borderRadius:8,overflow:"hidden",height:30}},
+    items.map(function(it,i){
+      return e("div",{key:i,title:it.n+": "+it.v+"%",style:{
+        width:(it.v/Math.max(t,1)*100)+"%",backgroundColor:it.c,
+        display:"flex",alignItems:"center",justifyContent:"center",
+        color:W,fontSize:9,fontWeight:600,minWidth:it.v>=5?20:0,transition:"width 0.3s",
+      }},it.v>=7?it.v+"%":"");
+    })
+  );
+}
+
+function ConstraintRow({assetKey,min,max,onMinChange,onMaxChange}){
+  const a=A[assetKey];
+  const isNC=NC.indexOf(assetKey)>=0;
+  return e("div",{style:{display:"flex",alignItems:"center",gap:6,padding:"8px 0",borderBottom:"1px solid #E2E8F0"}},
+    e("div",{style:{flex:"0 0 90px"}},
+      e("div",{style:{fontSize:12,fontWeight:isNC?700:500,color:isNC?TEAL:NAVY}},
+        a.n.replace("Annual ","Ann. ").replace("Permanent ","Perm. ")),
+      e("div",{style:{fontSize:9,color:MID}},"Ret: "+a.r+"% | Vol: "+a.v+"%")
+    ),
+    e("div",{style:{flex:1}},
+      e("div",{style:{display:"flex",alignItems:"center",gap:4}},
+        e("span",{style:{fontSize:10,color:MID,width:24}},"Min"),
+        e("input",{type:"range",min:0,max:100,step:1,value:min,
+          onChange:function(ev){onMinChange(Math.min(+ev.target.value,max));},
+          className:isNC?"teal":"navy",style:{flex:1}}),
+        e("span",{style:{fontSize:11,fontWeight:600,color:NAVY,width:28,textAlign:"right",fontVariantNumeric:"tabular-nums"}},min+"%")
+      ),
+      e("div",{style:{display:"flex",alignItems:"center",gap:4,marginTop:2}},
+        e("span",{style:{fontSize:10,color:MID,width:24}},"Max"),
+        e("input",{type:"range",min:0,max:100,step:1,value:max,
+          onChange:function(ev){onMaxChange(Math.max(+ev.target.value,min));},
+          className:isNC?"teal":"navy",style:{flex:1}}),
+        e("span",{style:{fontSize:11,fontWeight:600,color:NAVY,width:28,textAlign:"right",fontVariantNumeric:"tabular-nums"}},max+"%")
+      )
+    )
+  );
+}
+
+// ─── MAIN APP ───
+function App(){
+  const[tab,setTab]=useState("opt");
+
+  // Simulator
+  const[eq,setEq]=useState(55);
+  const[bd,setBd]=useState(30);
+  const[pvt,setPvt]=useState(8);
+  const[inf2,setInf2]=useState(5);
+  const[re,setRe]=useState(2);
+  const[ncT,setNcT]=useState(10);
+  const[mx,setMx]=useState({ac:25,pc:25,uf:25,usf:25});
+  const[portOpen,setPortOpen]=useState(true);
+  const[ncOpen,setNcOpen]=useState(true);
+
+  const tot=eq+bd+pvt+inf2+re;
+
+  const bw=useMemo(function(){
+    var w={};w.eq=eq/100;w.bd=bd/100;w.pe=pvt/100;w.inf=inf2/100;w.re=re/100;
+    NC.forEach(function(k){w[k]=0;});return w;
+  },[eq,bd,pvt,inf2,re]);
+
+  const nw=useMemo(function(){
+    var ncA=Math.min(ncT,tot);
+    var sc=tot>0?(tot-ncA)/tot:1;
+    var w={};w.eq=eq*sc/100;w.bd=bd*sc/100;w.pe=pvt*sc/100;w.inf=inf2*sc/100;w.re=re*sc/100;
+    var f=ncA/100;
+    w.ac=f*mx.ac/100;w.pc=f*mx.pc/100;w.uf=f*mx.uf/100;w.usf=f*mx.usf/100;
+    return w;
+  },[eq,bd,pvt,inf2,re,ncT,mx,tot]);
+
+  const bs=useMemo(function(){return calcStats(bw);},[bw]);
+  const ns=useMemo(function(){return calcStats(nw);},[nw]);
+
+  // Optimizer
+  const[constraints,setConstraints]=useState({
+    eq:{min:30,max:70},bd:{min:15,max:40},pe:{min:0,max:15},
+    inf:{min:0,max:10},re:{min:0,max:10},
+    ac:{min:0,max:10},pc:{min:0,max:10},uf:{min:0,max:10},usf:{min:0,max:10},
+  });
+  const[objective,setObjective]=useState("sharpe");
+  const[optResult,setOptResult]=useState(null);
+  const[optRunning,setOptRunning]=useState(false);
+  const[conOpen,setConOpen]=useState(true);
+
+  const updateCon=useCallback(function(k,field,val){
+    setConstraints(function(prev){var n=Object.assign({},prev);n[k]=Object.assign({},prev[k]);n[k][field]=val;return n;});
+  },[]);
+
+  const runOptimizer=useCallback(function(){
+    setOptRunning(true);
+    setTimeout(function(){
+      var mins=AKEYS.map(function(k){return constraints[k].min/100;});
+      var maxs=AKEYS.map(function(k){return constraints[k].max/100;});
+      var w;
+      if(objective==="sharpe")w=solveMaxSharpe(mins,maxs);
+      else if(objective==="minvol")w=solveMinVol(mins,maxs,null);
+      else w=solveMaxReturn(mins,maxs);
+      setOptResult(w);setOptRunning(false);
+    },50);
+  },[constraints,objective]);
+
+  const optStats=useMemo(function(){return optResult?calcStats(optResult):null;},[optResult]);
+
+  // Sharpe curve
+  const shCurve=useMemo(function(){
+    return[0,2,5,7,10,15,20].map(function(p){
+      var sc2=tot>0?(tot-p)/tot:1;
+      var tw={};tw.eq=eq*sc2/100;tw.bd=bd*sc2/100;tw.pe=pvt*sc2/100;tw.inf=inf2*sc2/100;tw.re=re*sc2/100;
+      var f2=p/100;tw.ac=f2*mx.ac/100;tw.pc=f2*mx.pc/100;tw.uf=f2*mx.uf/100;tw.usf=f2*mx.usf/100;
+      return{p:p,sh:calcStats(tw).sh};
+    });
+  },[eq,bd,pvt,inf2,re,tot,mx]);
+
+  // Sensitivity
+  const senRows=useMemo(function(){
+    var wt=optResult||nw;
+    var baseS=calcStats(bw);
+    return[
+      {l:"Central case",rA:0,vA:1,cA:1},
+      {l:"Return −200bps",rA:-2,vA:1,cA:1},
+      {l:"Volatility +50%",rA:0,vA:1.5,cA:1},
+      {l:"Correlation at 0.25",rA:0,vA:1,cA:2.5},
+      {l:"Combined adverse",rA:-2,vA:1.5,cA:2.5},
+    ].map(function(sc){
+      var ks=AKEYS.filter(function(k){return(wt[k]||0)>0;});
+      var r=0;ks.forEach(function(k){r+=wt[k]*(A[k].r+(NC.indexOf(k)>=0?sc.rA:0));});
+      var va=0;
+      ks.forEach(function(a){ks.forEach(function(b){
+        var c=corr(a,b);
+        if((NC.indexOf(a)>=0)!==(NC.indexOf(b)>=0))c=Math.min(c*sc.cA,.95);
+        va+=wt[a]*wt[b]*(A[a].v*(NC.indexOf(a)>=0?sc.vA:1))*(A[b].v*(NC.indexOf(b)>=0?sc.vA:1))*c;
+      });});
+      var vol=Math.sqrt(Math.max(va,0));
+      var sh=vol>0?(r-RF)/vol:0;
+      return{l:sc.l,sh:sh,d:sh-baseS.sh,pos:sh>baseS.sh};
+    });
+  },[optResult,nw,bw]);
+
+  // Frontier
+  const frontier=useMemo(function(){
+    var b=[],n=[];
+    for(var ee=20;ee<=90;ee+=5){
+      var w2={};AKEYS.forEach(function(k){w2[k]=0;});
+      w2.eq=ee/100;w2.bd=(100-ee)/100;b.push(calcStats(w2));
+      var n2=Object.assign({},w2);n2.eq*=.9;n2.bd*=.9;
+      n2.ac=.025;n2.pc=.025;n2.uf=.025;n2.usf=.025;n.push(calcStats(n2));
+    }
+    return{b:b,n:n};
+  },[]);
+
+  var activeW=optResult||nw;
+  var activeS=optStats||ns;
+  var minSum=AKEYS.reduce(function(s,k){return s+constraints[k].min;},0);
+
+  var tabs=[["opt","Optimiser"],["sim","Simulator"],["stress","Stress"],["sens","Sensitivity"],["front","Frontier"]];
+
+  // ─── RENDER ───
+  return e("div",{style:{fontFamily:"'DM Sans',-apple-system,sans-serif",background:LBG,minHeight:"100vh"}},
+
+    // Header
+    e("div",{style:{background:"linear-gradient(135deg,"+NAVY+" 0%,#2D3E5F 100%)",padding:"20px 20px 16px"}},
+      e("div",{style:{fontSize:22,fontWeight:700,color:W,letterSpacing:"-0.3px"}},"Natural Capital"),
+      e("div",{style:{fontSize:14,color:TEAL,fontWeight:600,marginTop:2}},"Portfolio Optimiser"),
+      e("div",{style:{fontSize:10,color:"#8899AA",marginTop:4,fontFamily:"'DM Mono',monospace"}},"Gresham House  ·  GBP, 1995–2023  ·  Modelled estimates")
+    ),
+
+    // Tabs
+    e("div",{className:"tab-scroll",style:{padding:"12px 14px 8px",display:"flex",gap:6,overflowX:"auto",WebkitOverflowScrolling:"touch"}},
+      tabs.map(function(t){return e(Pill,{key:t[0],active:tab===t[0],onClick:function(){setTab(t[0]);}},t[1]);})
+    ),
+
+    // Content
+    e("div",{style:{padding:"4px 14px 24px"}},
+
+      // ═══════ OPTIMISER ═══════
+      tab==="opt" && e(React.Fragment,null,
+        e(Card,null,
+          e("div",{style:{fontSize:13,fontWeight:700,color:NAVY,marginBottom:8}},"Objective"),
+          e("div",{style:{display:"flex",gap:6}},
+            [["sharpe","Max Sharpe"],["minvol","Min Volatility"],["maxret","Max Return"]].map(function(o){
+              return e("button",{key:o[0],onClick:function(){setObjective(o[0]);},style:{
+                flex:1,padding:"10px 6px",borderRadius:8,border:objective===o[0]?"2px solid "+TEAL:"1px solid #E2E8F0",
+                background:objective===o[0]?LT:W,fontSize:12,fontWeight:600,fontFamily:"inherit",
+                color:objective===o[0]?TEAL:MID,cursor:"pointer",
+              }},o[1]);
+            })
+          )
+        ),
+
+        e(Section,{title:"Asset Constraints (Min / Max)",open:conOpen,toggle:function(){setConOpen(!conOpen);}},
+          AKEYS.map(function(k){
+            return e(ConstraintRow,{key:k,assetKey:k,min:constraints[k].min,max:constraints[k].max,
+              onMinChange:function(v){updateCon(k,"min",v);},onMaxChange:function(v){updateCon(k,"max",v);}});
+          }),
+          e("div",{style:{marginTop:10,fontSize:11,color:MID}},
+            "Min sum: "+minSum+"%  |  Max sum: "+AKEYS.reduce(function(s,k){return s+constraints[k].max;},0)+"%",
+            minSum>100?e("span",{style:{color:RED,fontWeight:600}}," — Minimums exceed 100%!"):null
+          ),
+          e("div",{style:{display:"flex",gap:6,marginTop:10,flexWrap:"wrap"}},
+            [
+              ["Conservative",{eq:{min:40,max:60},bd:{min:25,max:40},pe:{min:0,max:5},inf:{min:0,max:5},re:{min:0,max:5},ac:{min:0,max:5},pc:{min:0,max:5},uf:{min:0,max:5},usf:{min:0,max:5}}],
+              ["Balanced",{eq:{min:30,max:70},bd:{min:15,max:40},pe:{min:0,max:15},inf:{min:0,max:10},re:{min:0,max:10},ac:{min:0,max:10},pc:{min:0,max:10},uf:{min:0,max:10},usf:{min:0,max:10}}],
+              ["Growth",{eq:{min:40,max:80},bd:{min:5,max:25},pe:{min:0,max:20},inf:{min:0,max:10},re:{min:0,max:10},ac:{min:0,max:15},pc:{min:0,max:15},uf:{min:0,max:15},usf:{min:0,max:10}}],
+              ["NC Focus",{eq:{min:30,max:55},bd:{min:15,max:30},pe:{min:0,max:10},inf:{min:0,max:5},re:{min:0,max:5},ac:{min:3,max:15},pc:{min:3,max:15},uf:{min:3,max:15},usf:{min:2,max:10}}],
+            ].map(function(p){
+              return e("button",{key:p[0],onClick:function(){setConstraints(p[1]);},style:{
+                padding:"6px 14px",borderRadius:6,border:"1px solid #E2E8F0",background:W,
+                fontSize:11,fontWeight:500,color:NAVY,cursor:"pointer",fontFamily:"inherit",
+              }},p[0]);
+            })
+          )
+        ),
+
+        // Run button
+        e("button",{onClick:runOptimizer,disabled:optRunning||minSum>100,style:{
+          width:"100%",padding:"14px",borderRadius:12,border:"none",
+          background:optRunning?MID:"linear-gradient(135deg,"+TEAL+" 0%,#0D9488 100%)",color:W,fontSize:15,fontWeight:700,
+          cursor:optRunning?"default":"pointer",marginBottom:12,fontFamily:"inherit",
+          opacity:minSum>100?.4:1,boxShadow:"0 4px 12px rgba(0,165,168,.3)",
+        }},optRunning?"Optimising...":"Run Optimisation"),
+
+        // Results
+        optResult&&optStats?e(React.Fragment,null,
+          e(Card,{style:{display:"flex",gap:0,padding:"4px 0"}},
+            e(Stat,{label:"Return",val:optStats.r.toFixed(1),unit:"%",delta:optStats.r-bs.r}),
+            e("div",{style:{width:1,background:"#E2E8F0",margin:"8px 0"}}),
+            e(Stat,{label:"Volatility",val:optStats.vol.toFixed(1),unit:"%",delta:optStats.vol-bs.vol}),
+            e("div",{style:{width:1,background:"#E2E8F0",margin:"8px 0"}}),
+            e(Stat,{label:"Sharpe",val:optStats.sh.toFixed(2),delta:optStats.sh-bs.sh})
+          ),
+          e(Card,null,
+            e("div",{style:{fontSize:13,fontWeight:700,color:NAVY,marginBottom:8}},"Optimal Allocation"),
+            e(AllocBar,{w:optResult}),
+            e("div",{style:{marginTop:12}},
+              AKEYS.filter(function(k){return(optResult[k]||0)>.004;}).map(function(k){
+                var pct=Math.round((optResult[k]||0)*100);
+                var isNC2=NC.indexOf(k)>=0;
+                return e("div",{key:k,style:{display:"flex",alignItems:"center",marginBottom:4}},
+                  e("div",{style:{width:10,height:10,borderRadius:2,backgroundColor:A[k].c,marginRight:8,flexShrink:0}}),
+                  e("span",{style:{flex:1,fontSize:12,fontWeight:isNC2?600:400,color:isNC2?TEAL:NAVY}},A[k].n),
+                  e("div",{style:{flex:"0 0 120px",display:"flex",alignItems:"center",gap:4}},
+                    e("div",{style:{flex:1,height:8,background:"#F1F5F9",borderRadius:4,overflow:"hidden"}},
+                      e("div",{style:{width:pct+"%",height:"100%",backgroundColor:A[k].c,borderRadius:4}})
+                    ),
+                    e("span",{style:{fontSize:12,fontWeight:700,color:NAVY,width:30,textAlign:"right",fontVariantNumeric:"tabular-nums"}},pct+"%")
+                  )
+                );
+              })
+            ),
+            // NC total
+            (function(){
+              var ncPct=NC.reduce(function(s,k){return s+Math.round((optResult[k]||0)*100);},0);
+              return ncPct>0?e("div",{style:{marginTop:10,padding:"8px 12px",background:LT,borderRadius:8,display:"flex",justifyContent:"space-between",alignItems:"center"}},
+                e("span",{style:{fontSize:12,fontWeight:600,color:TEAL}},"Total Natural Capital"),
+                e("span",{style:{fontSize:16,fontWeight:700,color:TEAL}},ncPct+"%")
+              ):null;
+            })()
+          ),
+          // Stress mini
+          e(Card,null,
+            e("div",{style:{fontSize:13,fontWeight:700,color:NAVY,marginBottom:8}},"Stress Test: Optimal Portfolio"),
+            Object.keys(ST).map(function(sc){
+              var bR=stressR(bw,sc),oR=stressR(optResult,sc);
+              return e("div",{key:sc,style:{display:"flex",alignItems:"center",padding:"6px 0",borderBottom:"1px solid #E2E8F0"}},
+                e("div",{style:{flex:"0 0 85px",fontSize:11,fontWeight:600,color:NAVY}},sc.replace("2022 ","'22 ")),
+                e("div",{style:{flex:1,textAlign:"center"}},
+                  e("span",{style:{fontSize:11,color:bR>=0?GRN:RED,fontVariantNumeric:"tabular-nums"}},(bR>=0?"+":"")+bR.toFixed(1)+"%"),
+                  e("span",{style:{color:"#CBD5E1",margin:"0 4px"}},"→"),
+                  e("span",{style:{fontSize:12,fontWeight:700,color:oR>=0?GRN:RED,fontVariantNumeric:"tabular-nums"}},(oR>=0?"+":"")+oR.toFixed(1)+"%")
+                ),
+                e("span",{style:{fontSize:11,fontWeight:600,color:GRN,flex:"0 0 55px",textAlign:"right"}},"+"+((oR-bR).toFixed(1))+"%")
+              );
+            })
+          )
+        ):null
+      ),
+
+      // ═══════ SIMULATOR ═══════
+      tab==="sim" && e(React.Fragment,null,
+        e(Card,{style:{display:"flex",gap:0,padding:"4px 0"}},
+          e(Stat,{label:"Return",val:ns.r.toFixed(1),unit:"%",delta:ns.r-bs.r}),
+          e("div",{style:{width:1,background:"#E2E8F0",margin:"8px 0"}}),
+          e(Stat,{label:"Volatility",val:ns.vol.toFixed(1),unit:"%",delta:ns.vol-bs.vol}),
+          e("div",{style:{width:1,background:"#E2E8F0",margin:"8px 0"}}),
+          e(Stat,{label:"Sharpe",val:ns.sh.toFixed(2),delta:ns.sh-bs.sh})
+        ),
+
+        e(Section,{title:"Your Current Portfolio",open:portOpen,toggle:function(){setPortOpen(!portOpen);}},
+          e(RangeSlider,{label:"Equities",value:eq,onChange:setEq,cls:A.eq.cls}),
+          e(RangeSlider,{label:"Bonds",value:bd,onChange:setBd,cls:A.bd.cls}),
+          e(RangeSlider,{label:"Private Equity",value:pvt,onChange:setPvt,max:30,cls:A.pe.cls}),
+          e(RangeSlider,{label:"Infrastructure",value:inf2,onChange:setInf2,max:20,cls:A.inf.cls}),
+          e(RangeSlider,{label:"Real Estate",value:re,onChange:setRe,max:20,cls:A.re.cls}),
+          e("div",{style:{textAlign:"right",fontSize:12,fontWeight:600,color:tot===100?GRN:RED,marginBottom:8}},"Total: "+tot+"%"+(tot!==100?" — adjust to 100%":" ✓")),
+          e(AllocBar,{w:bw})
+        ),
+
+        e(Section,{title:"Natural Capital: "+ncT+"%",open:ncOpen,toggle:function(){setNcOpen(!ncOpen);},accent:true},
+          e(RangeSlider,{label:"Total NC",value:ncT,onChange:setNcT,max:20,color:TEAL,cls:"teal"}),
+          e("div",{style:{fontSize:11,color:MID,margin:"6px 0 2px"}},"Sub-allocation (% of NC):"),
+          e(RangeSlider,{label:"Ann. Cropland",value:mx.ac,onChange:function(v){setMx(Object.assign({},mx,{ac:v}));},color:A.ac.c,cls:"teal"}),
+          e(RangeSlider,{label:"Perm. Cropland",value:mx.pc,onChange:function(v){setMx(Object.assign({},mx,{pc:v}));},color:A.pc.c,cls:"dteal"}),
+          e(RangeSlider,{label:"UK Forestry",value:mx.uf,onChange:function(v){setMx(Object.assign({},mx,{uf:v}));},color:A.uf.c,cls:"green"}),
+          e(RangeSlider,{label:"US Forestry",value:mx.usf,onChange:function(v){setMx(Object.assign({},mx,{usf:v}));},color:A.usf.c,cls:"dgreen"}),
+          e("div",{style:{textAlign:"right",fontSize:11,fontWeight:600,color:mx.ac+mx.pc+mx.uf+mx.usf===100?GRN:RED}},"Mix: "+(mx.ac+mx.pc+mx.uf+mx.usf)+"%"+(mx.ac+mx.pc+mx.uf+mx.usf===100?" ✓":"")),
+          e("div",{style:{marginTop:8}},e(AllocBar,{w:nw}))
+        ),
+
+        e(Card,null,
+          e("div",{style:{fontSize:13,fontWeight:700,color:NAVY,marginBottom:10}},"Sharpe by NC Allocation"),
+          e("div",{style:{display:"flex",alignItems:"flex-end",gap:4,height:100}},
+            shCurve.map(function(item){
+              var h=Math.max(item.sh/1.2*90,4);var cur=item.p===ncT;
+              return e("div",{key:item.p,style:{flex:1,textAlign:"center"}},
+                e("div",{style:{fontSize:9,fontWeight:600,color:cur?TEAL:NAVY,marginBottom:2}},item.sh.toFixed(2)),
+                e("div",{style:{height:h,backgroundColor:cur?TEAL:item.p===0?NAVY:"#CBD5E1",borderRadius:"3px 3px 0 0",transition:"all 0.3s",margin:"0 auto",width:"70%"}}),
+                e("div",{style:{fontSize:9,color:cur?TEAL:MID,fontWeight:cur?700:400,marginTop:3}},item.p+"%")
+              );
+            })
+          )
+        )
+      ),
+
+      // ═══════ STRESS ═══════
+      tab==="stress" && e(React.Fragment,null,
+        e(Card,null,
+          e("div",{style:{fontSize:14,fontWeight:700,color:NAVY,marginBottom:12}},"Stress Scenarios"),
+          Object.keys(ST).map(function(sc){
+            var bR=stressR(bw,sc);
+            var nR=stressR(activeW,sc);
+            return e("div",{key:sc,style:{marginBottom:16}},
+              e("div",{style:{fontSize:12,fontWeight:700,color:NAVY,marginBottom:6}},sc),
+              [["Baseline",bR,NAVY],["With NC",nR,TEAL]].map(function(row){
+                return e("div",{key:row[0],style:{display:"flex",alignItems:"center",gap:8,marginBottom:4}},
+                  e("span",{style:{fontSize:11,color:row[2],width:58,fontWeight:500,flexShrink:0}},row[0]),
+                  e("div",{style:{flex:1,height:20,background:"#F1F5F9",borderRadius:4,overflow:"hidden",position:"relative"}},
+                    e("div",{style:{position:"absolute",left:row[1]>=0?0:"auto",right:row[1]<0?0:"auto",width:Math.min(Math.abs(row[1])*2.5,100)+"%",height:"100%",backgroundColor:row[1]>=0?GRN:RED,borderRadius:4,opacity:.8}})
+                  ),
+                  e("span",{style:{fontSize:12,fontWeight:700,color:row[1]>=0?GRN:RED,width:44,textAlign:"right",fontVariantNumeric:"tabular-nums",flexShrink:0}},(row[1]>=0?"+":"")+row[1].toFixed(1)+"%")
+                );
+              }),
+              e("div",{style:{fontSize:11,color:GRN,fontWeight:600,textAlign:"right"}},"+"+(nR-bR).toFixed(1)+"% better")
+            );
+          })
+        )
+      ),
+
+      // ═══════ SENSITIVITY ═══════
+      tab==="sens" && e(React.Fragment,null,
+        e(Card,null,
+          e("div",{style:{fontSize:14,fontWeight:700,color:NAVY,marginBottom:12}},"What If Assumptions Are Wrong?"),
+          senRows.map(function(row,i){
+            var isComb=row.l.indexOf("Combined")>=0;
+            return e("div",{key:i,style:Object.assign({
+              display:"flex",alignItems:"center",gap:8,padding:"10px 0",
+              borderBottom:i<senRows.length-1?"1px solid #E2E8F0":"none",
+            },isComb?{background:LT,margin:"4px -16px 0",padding:"12px 16px",borderRadius:8}:{})},
+              e("div",{style:{flex:1}},
+                e("div",{style:{fontSize:12,fontWeight:isComb?700:500,color:NAVY}},row.l),
+                e("div",{style:{fontSize:11,color:MID}},"Sharpe: ",e("strong",null,row.sh.toFixed(3)))
+              ),
+              e("div",{style:{textAlign:"right",flexShrink:0}},
+                e("div",{style:{fontSize:14,fontWeight:700,color:row.pos?GRN:RED}},(row.d>=0?"+":"")+row.d.toFixed(3)),
+                e("div",{style:{fontSize:10,fontWeight:600,color:row.pos?GRN:RED}},row.pos?"✓ Positive":"✗ Negative")
+              )
+            );
+          })
+        ),
+        e("div",{style:{background:LT,borderRadius:10,padding:14,border:"1px solid rgba(0,165,168,.2)"}},
+          e("div",{style:{fontSize:12,fontWeight:700,color:NAVY,marginBottom:4}},"Key Takeaway"),
+          e("div",{style:{fontSize:12,color:NAVY,lineHeight:1.6}},
+            "Even under combined adverse conditions — returns −200bps, vol +50%, correlation at 0.25 — the Sharpe improvement stays positive.")
+        )
+      ),
+
+      // ═══════ FRONTIER ═══════
+      tab==="front" && e(React.Fragment,null,
+        e(Card,null,
+          e("div",{style:{fontSize:14,fontWeight:700,color:NAVY,marginBottom:10}},"Efficient Frontier Shift"),
+          e("svg",{viewBox:"0 0 320 220",style:{width:"100%",display:"block"}},
+            [0,1,2,3,4].map(function(i){return e("g",{key:"y"+i},
+              e("line",{x1:40,y1:185-i*36,x2:310,y2:185-i*36,stroke:"#E2E8F0",strokeWidth:.5}),
+              e("text",{x:37,y:188-i*36,textAnchor:"end",fontSize:8,fill:MID},(4+i*2)+"%")
+            );}),
+            [0,1,2,3,4].map(function(i){return e("g",{key:"x"+i},
+              e("line",{x1:40+i*67,y1:185,x2:40+i*67,y2:40,stroke:"#E2E8F0",strokeWidth:.5}),
+              e("text",{x:40+i*67,y:200,textAnchor:"middle",fontSize:8,fill:MID},(5+i*4)+"%")
+            );}),
+            e("text",{x:175,y:215,textAnchor:"middle",fontSize:9,fill:MID},"Volatility"),
+            e("polyline",{points:frontier.b.map(function(p){return(40+(p.vol-5)/16*270)+","+(185-(p.r-4)/8*144);}).join(" "),fill:"none",stroke:NAVY,strokeWidth:1.5,strokeDasharray:"3,2",opacity:.5}),
+            e("polyline",{points:frontier.n.map(function(p){return(40+(p.vol-5)/16*270)+","+(185-(p.r-4)/8*144);}).join(" "),fill:"none",stroke:TEAL,strokeWidth:2}),
+            e("circle",{cx:40+(bs.vol-5)/16*270,cy:185-(bs.r-4)/8*144,r:5,fill:RED,stroke:W,strokeWidth:1.5}),
+            e("text",{x:Math.min(40+(bs.vol-5)/16*270+8,280),y:185-(bs.r-4)/8*144-6,fontSize:8,fill:RED,fontWeight:"bold"},"Baseline"),
+            optStats?e(React.Fragment,null,
+              e("circle",{cx:40+(optStats.vol-5)/16*270,cy:185-(optStats.r-4)/8*144,r:5,fill:TEAL,stroke:W,strokeWidth:1.5}),
+              e("text",{x:Math.min(40+(optStats.vol-5)/16*270+8,260),y:185-(optStats.r-4)/8*144+12,fontSize:8,fill:TEAL,fontWeight:"bold"},"Optimal")
+            ):null,
+            e("line",{x1:200,y1:20,x2:216,y2:20,stroke:NAVY,strokeWidth:1.5,strokeDasharray:"3,2",opacity:.5}),
+            e("text",{x:220,y:23,fontSize:7.5,fill:MID},"Eq/Bond"),
+            e("line",{x1:200,y1:32,x2:216,y2:32,stroke:TEAL,strokeWidth:2}),
+            e("text",{x:220,y:35,fontSize:7.5,fill:MID},"+10% NC")
+          )
+        ),
+        e(Card,null,
+          e("div",{style:{fontSize:13,fontWeight:700,color:NAVY,marginBottom:8}},"Correlation to Equities"),
+          [["Private Equity",.65],["Infrastructure",.60],["Real Estate",.55],["Ann. Cropland",.10],["Perm. Cropland",.12],["UK Forestry",.08],["US Forestry",.06]].map(function(row,i){
+            var isNC2=i>=3;
+            return e("div",{key:i,style:{display:"flex",alignItems:"center",gap:8,marginBottom:8}},
+              e("span",{style:{fontSize:12,width:100,color:isNC2?TEAL:NAVY,fontWeight:isNC2?600:400,flexShrink:0}},row[0]),
+              e("div",{style:{flex:1,height:12,background:"#F1F5F9",borderRadius:6,overflow:"hidden"}},
+                e("div",{style:{width:(row[1]*100)+"%",height:"100%",backgroundColor:isNC2?TEAL:NAVY,borderRadius:6,opacity:isNC2?1:.6}})
+              ),
+              e("span",{style:{fontSize:12,fontWeight:700,color:isNC2?TEAL:NAVY,width:32,textAlign:"right",fontVariantNumeric:"tabular-nums",flexShrink:0}},row[1].toFixed(2))
+            );
+          })
+        )
+      )
+    ),
+
+    // Footer
+    e("div",{style:{padding:"12px 16px 24px",borderTop:"1px solid #E2E8F0"}},
+      e("div",{style:{fontSize:9,color:MID,lineHeight:1.6,textAlign:"center",fontFamily:"'DM Mono',monospace"}},
+        "Modelled estimates, 1995–2023. Not investment advice. NC investments involve illiquidity, climate, commodity & regulatory risk. Sources: NCREIF; S&P; Bloomberg; Gresham House.")
+    )
+  );
+}
+
+ReactDOM.render(e(App), document.getElementById("root"));
+</script>
+</body>
+</html>
